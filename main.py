@@ -60,7 +60,7 @@ class result_window:
 
 
         self.tree.bind('<Button-1>',self.left_click)
-        # self.tree.bind('d', self.delete_entry)
+        self.tree.bind('d', self.delete_entry)
         # self.tree.bind(('<Button-3>' ), self.double_left_click)
         # self.tree.bind(('<Button-2>'), self.double_left_click)
         # self.tree.bind(('w'), self.double_left_click)
@@ -117,6 +117,15 @@ class result_window:
         if not iid == '':
             iid = int(iid)
 
+    def delete_entry(self, event):
+        iid = self.clickID
+        if not iid == '':
+            iid = int(iid)
+            del self.fileList[iid]
+            self.delete()
+            self.display()
+            self.clickID = ''
+
 class MainArea(tk.Frame):
     def __init__(self, master,stat, **kwargs):
         tk.Frame.__init__(self, master, **kwargs)
@@ -164,6 +173,8 @@ class MainArea(tk.Frame):
         el.button("Select ROI", self.selectPath, {self.roi_path}, 0, 1, tk.W + tk.E, 1)  # Selection of root directory
         el.button("Timecourse", self.generate_timecourse, '', 0, 2, tk.W + tk.E, 1)  # Generate time course
         el.button("Generate Profile", self.generate_profile, '', 0, 3, tk.W + tk.E, 1)  # Generate profile
+        el.button("Process", self.process, '', 0, 4, tk.W + tk.E, 1)  # Generate profile
+
         self.dataset = el.textField("Identifier", 20, 1, 0)  # Task or Dataset to be searched for
         self.filters = el.textField("Filters", 20, 1, 1)  # keywords to filter individual datasets
         el.button("Search", self.search, '', 3, 0, tk.N + tk.S, 1)  # button press to start search
@@ -171,14 +182,12 @@ class MainArea(tk.Frame):
         # el.check('Overwrite', self.overwrite, 4, 1)  # checkbox for overwrite option
 
 
-
-
         # method for calling directory picker
-
     def selectPath(self, var):
         if test_case == 1:
-            self.roi_path = self.roi_tree.file_path = 'test_data/PPI'
-            self.file_path = 'test_data/Subject'
+            root = Path(__file__).parent.absolute()
+            self.roi_path = self.roi_tree.file_path = root/'test_data'/'PPI'
+            self.file_path = root/'test_data'/'Subject'
         else:
             var = appFuncs.selectPath()
             self.stat.set('Database Selected: %s', var)
@@ -204,27 +213,13 @@ class MainArea(tk.Frame):
         identifier = f'*{dataset}*.feat'
         if dataset=='':identifier = f'*.feat'
 
-        # identifier = f'filtered_func_data.nii*'
         # Search for all files that match task
         search_list = Path(self.file_path).rglob(f'{identifier}')
 
-        # search_list = self.verify_dataset(search_list)
         filtered_list = self.apply_filters(search_list)
-
         self.result_tree.fileList = self.aggregated_list(filtered_list)
-        # Refresh results display
-        # h_list =[]
-        # for i in search_list:
-        #     h_list.append([i,10])
-        # #     print(i)
-
-
-        # search_list = self.verify_dataset(search_list)
-        # filtered_list = self.apply_filters(search_list)
-        # self.result_tree.fileList = self.aggregated_list(filtered_list)
-        # self.result_tree.fileList = h_list
-        # Refresh results display
         self.result_tree.display()  # display the results
+
 
     #  generates time course for each user in the list
     def generate_timecourse(self):
@@ -241,18 +236,13 @@ class MainArea(tk.Frame):
             file = row[0]
             subject = file
             # subject = Path(file).parent
+            mat_file = subject / 'reg' / 'standard2example_func.mat'
+            ref = subject/ 'filtered_func_data.nii.gz'
+            print(f'File : {subject}    and cluster name unbin is {cluster_name_unbin}')
 
-            print(f'File : {file}    and cluster name unbin is {cluster_name_unbin}')
-            feat = Path(subject).glob('*.feat')
-            if feat == '':
-                mat_file = subject/'reg'/'standard2example_func.mat'
-            else:
-                for f in feat:
-                    mat_file = f/ 'reg' / 'standard2example_func.mat'
-                    print(mat_file)
-            flirt = ['flirt', '-in', roi, '-omat', mat_file, '-ref', file, '-out', subject/cluster_name_unbin]
+            flirt = ['flirt', '-in', roi, '-omat', mat_file, '-ref', ref, '-out', subject/cluster_name_unbin]
             maths = ['fslmaths', subject/cluster_name_unbin, '-bin', subject/cluster_name_bin]
-            meants = ['fslmeants', '-i', file, '-o', subject/timecourse_name, '-m', Path(file).parent/cluster_name_bin]
+            meants = ['fslmeants', '-i', ref, '-o', subject/timecourse_name, '-m', subject/cluster_name_bin]
             print(flirt)
             print('\n\n')
             subprocess.run(flirt)
@@ -260,49 +250,93 @@ class MainArea(tk.Frame):
             subprocess.run(meants)
         print('Timecourses Generated!')
 
+
     #  Allows user to create a custom design profile which can then be applied to all datasets
     def generate_profile(self):
         # use a sample profile to load the basics and
         # call FSL from here and run the FEAT tool.
-        output_dir = ''
-        subject_dir = ''
-        subject_timecourse = ''
+        id = 0
+        for row in self.result_tree.fileList:
+            if id == 0:
+                subject = row[0]
+                id += 1
+            else:
+                break
+        roi_id = self.roi_tree.clickID
+        roi = self.roi_tree.fileList[int(roi_id)][0]
+        roi_name = Path(Path(roi).stem).stem
+        output_dir = subject/f'PPI_{roi_name}.feat'
+        subject_dir = subject/'filtered_func_data.nii.gz'
+        subject_timecourse = subject/f'timecourse_{roi_name}.txt'
 
         root = Path(__file__).parent.absolute()
-        sample_profile = root /'design.fsf'
-        base_profile = root / 'temp_design.fsf'
+        sample_profile = root /'sample_design.fsf'
+        base_profile = root /'temp'/'temp_design.fsf'
         subprocess.run(['cp', sample_profile, base_profile])
         # read in the base profile
         fin = open(base_profile, "rt")
         data = fin.read()
-
-        # set fmri(outputdir) "#%#"
-        data = data.replace('#%#',output_dir)
-
-        # 4D AVW data or FEAT directory (1)
-        # set feat_files(1) "#$#"
-        data = data.replace('#$#', subject_dir)
-
-        # Custom EV file (EV 2)
-        # set fmri(custom2) "#!#"
-        data = data.replace('#!#', subject_timecourse)
+        data = data.replace('#%#',str(output_dir))
+        data = data.replace('#$#', str(subject_dir))
+        data = data.replace('#!#', str(subject_timecourse))
 
         fin.close()
-        #open the input file in write mode
-        fin = open("data.txt", "wt")
-        #overrite the input file with the resulting data
+        fin = open(base_profile, "wt")
         fin.write(data)
-        #close the file
         fin.close()
 
         subprocess.run(['Feat', base_profile])
 
-    # # Checks if the selected dataset is a preprocessed dataset for one individual.
-    # # Filters out based on presence of a report_prestat.html file
-    # @staticmethod
-    # def verify_dataset(file_list):
-    #     fl = [dataset for dataset in file_list if (Path(dataset/'report_prestats.html').exists()) and not(Path(dataset/'cluster_zstat1.html').exists())]
-    #     return fl
+
+        # reverse the subject specific paths
+        fin = open(base_profile, "rt")
+        data = fin.read()
+        data = data.replace(str(output_dir), '#%#')
+        data = data.replace(str(subject_dir), '#$#')
+        data = data.replace(str(subject_timecourse), '#!#')
+
+        fin.close()
+        fin = open(base_profile, "wt")
+        fin.write(data)
+        fin.close()
+
+    def process(self):
+        root = Path(__file__).parent.absolute()
+        base_profile = root /'temp'/'temp_design.fsf'
+
+        roi_id = self.roi_tree.clickID
+        roi = self.roi_tree.fileList[int(roi_id)][0]
+        roi_name = Path(Path(roi).stem).stem
+
+        for row in self.result_tree.fileList:
+            subject = row[0]
+            print(subject)
+            subject_profile = root/'temp'/ f'temp_{Path(subject).stem}.fsf'
+            output_dir = subject / f'PPI_{roi_name}.feat'
+            subject_dir = subject / 'filtered_func_data.nii.gz'
+            subject_timecourse = subject / f'timecourse_{roi_name}.txt'
+            subprocess.run(['cp', base_profile, subject_profile])
+            # subject_profile = base_profile
+            # read in and modify the subject profile
+
+            print(str(subject_profile))
+            fin = open(subject_profile, "rt")
+            data = fin.read()
+            data = data.replace('#%#', str(output_dir))
+            data = data.replace('#$#', str(subject_dir))
+            data = data.replace('#!#', str(subject_timecourse))
+
+            fin.close()
+            fin = open(subject_profile, "wt")
+            fin.write(data)
+            fin.close()
+
+            subprocess.run(['feat', subject_profile])
+            subprocess.run(['rm', '-rf', f'temp/{subject_profile}'])
+
+        # empty the temp folder
+        subprocess.run(['rm', '-rf','temp/*'])
+
 
     def apply_filters(self,file_list):
         # List of datasets as string for display purposes
@@ -320,22 +354,7 @@ class MainArea(tk.Frame):
             fl.append([row,1])
         return fl
 
-        # prefix = self.config.prefeat_identifier
-        # suffix = self.config.output_identifier
-        # fl = []
-        # iid = 0
-        # for inpath in filtered_list:
-        #     pop=0
-        #     # is the resulting file a post-processed file from ICA-AROMA processed data
-        #     pop_i = appFuncs.postProcessed_identifier(inpath)
-        #     if pop_i == 0:
-        #         # generate output path of file
-        #         outpath = appFuncs.generateOutpath(inpath, prefix, suffix)
-        #         pvp = appFuncs.prevProcessed(outpath)
-        #         if pvp == 1:    pop = appFuncs.postProcessed(outpath)
-        #         head_motion_stats = appFuncs.headMotion_stats(inpath)
-        #         fl.append([inpath, outpath, head_motion_stats, pvp, pop, iid])
-        #         iid += 1
+
 #-----------------------------------------------------------------------------------------------------------------------
 
 class StatusBar(tk.Frame):
@@ -441,3 +460,6 @@ class MainApp(tk.Frame):
 root = tk.Tk()
 PR = MainApp(root)
 root.mainloop()
+
+# todo make functions to remove all repetitions
+# todo save temp design file in temp folder and just edit that instead
