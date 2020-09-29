@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 import subprocess, json, threading, statistics, time, webbrowser, os, re
 import concurrent.futures
 
-test_case = 0
+test_case = 2
 name='haPPI'
 version='0.1-beta'
 
@@ -43,15 +43,14 @@ class Elements:
         self.b.grid(row=y_, column=x_, sticky=algn)
 
 
-    def popupMenu(self, label, charVariable,choices,x_,y_):
-        self.popupMenu=tk.OptionMenu(self.master, charVariable, *choices)
-        self.popupMenu.configure(width=12)
-        self.popupMenu.grid(row=y_,column=x_)
-        self.labelMenu=tk.Label(self.master,text=label)
-        self.labelMenu.grid(row=y_, column=x_-1)
+    def popupMenu(self, charVariable,choices,x_,y_,width,stick):
+        popupMenu=tk.OptionMenu(self.master, charVariable, *choices)
+        popupMenu.configure(width=width)
+        popupMenu.grid(row=y_,column=x_,sticky=stick)
+        # self.labelMenu=tk.Label(self.master,text=label)
+        # self.labelMenu.grid(row=y_, column=x_-1)
 
-
-#   class for tkinter Treeview and related functions
+#  Class for tkinter Treeview and related functions
 class result_window:
 
     def __init__(self, parent,stat, headings, name):
@@ -137,6 +136,7 @@ class result_window:
             self.display()
             self.clickID = ''
 
+
 class MainArea(tk.Frame):
     def __init__(self, master,stat, **kwargs):
         tk.Frame.__init__(self, master, **kwargs)
@@ -204,12 +204,12 @@ class MainArea(tk.Frame):
         # Controls
         el = Elements(self.fr_ppi)
         el.button("Database", self.selectPath, 1, 0, 0, tk.W + tk.E, 1)  # Selection of root directory
-        el.button("Select ROI", self.selectPath, 2, 0, 1, tk.W + tk.E, 1)  # Selection of root directory
+        el.button("Select ROI", self.selectPath, 2, 0, 1, tk.W + tk.E, 1)  # Selection of ROI directory
         el.button("Timecourse", self.generate_timecourse, '', 0, 2, tk.W + tk.E, 1)  # Generate time course
         el.button("Generate Profile", self.generate_profile, '', 0, 3, tk.W + tk.E, 1)  # Generate profile
         el.button("Process", self.process, '', 0, 4, tk.W + tk.E, 1)  # Generate profile
 
-        self.dataset = el.textField("Identifier", 20, 1, 0)  # Task or Dataset to be searched for
+        self.search_str = el.textField("Identifier", 20, 1, 0)  # Task or Dataset to be searched for
         self.filters = el.textField("Filters", 20, 1, 1)  # keywords to filter individual datasets
         el.button("Search", self.search, '', 3, 0, tk.N + tk.S, 1)  # button press to start search
         el.button("Clear", self.search, '', 3, 1, tk.N, 1)  # button press to clear selection
@@ -217,7 +217,10 @@ class MainArea(tk.Frame):
 
 
         ## ROI generation
-        self.er = Elements(self.fr_roi_gen_child)
+        self.er = Elements(self.fr_roi_gen)
+        self.er.button('ROI Location',self.selectPath, 2, 3, 0, 'e', 1)  # Selection of ROI directory
+        self.er.button('Update ROI List', self.roi_search,'', 4, 0, 'e', 1)  # Selection of ROI directory
+
         self.OptionList = ['Select a method' , 'Atlas based' , 'Peak Activation - Group' , 'Peak Activation - Individual', 'Group Differences' , 'Geometry Based']
         self.option_var = tk.StringVar(self.fr_roi_gen)
         self.option_var.set(self.OptionList[0])
@@ -230,16 +233,17 @@ class MainArea(tk.Frame):
 
 
     def roi_gen(self, *args):
-        roif = roi_funcs(self.fr_roi_gen_child,self.er)
+        roif = roi_funcs(self.fr_roi_gen_child,self.roi_path, self.roi_search, self.roi_tree)
         roi_option = self.option_var.get()
 
         if roi_option == self.OptionList[1]:
             self.clear_frame(self.fr_roi_gen_child)
-            subprocess.run(['fsleyes'])
+            roif.atlas_based()
+
 
         if roi_option == self.OptionList[2]:
             self.clear_frame(self.fr_roi_gen_child)
-            roif.peak_group(self.er)
+            roif.peak_group()
 
         if roi_option == self.OptionList[3]:
             self.clear_frame(self.fr_roi_gen_child)
@@ -254,15 +258,20 @@ class MainArea(tk.Frame):
             roif.geometry_based()
 
 
+
         # method for calling directory picker
+
     def selectPath(self, var):
         self.root = Path(__file__).parent.absolute()
 
         if test_case == 1:
             self.roi_path = self.roi_tree.file_path = self.root/'test_data'/'PPI'
             self.file_path = self.root/'test_data'/'Subject'
+
+        if test_case == 2:
+            self.roi_path = self.roi_tree.file_path = '/home/quest/Desktop/aNMT_pre_withICAaroma/ManuscriptAnalyses/ROI/'
+            self.file_path = '/home/quest/Desktop/aNMT_pre_withICAaroma/'
         else:
-            print(var)
             path = appFuncs.selectPath()
             if var == 1:
                 self.file_path = path
@@ -275,31 +284,36 @@ class MainArea(tk.Frame):
 
 
         # executed on clicking search button, this function lists all the datasets
-
-    def search(self):
-        # print(f'ROI path {self.roi_path}')
-        # print(f'Database path {self.file_path}')
-
+    def roi_search(self):
         #  ROI Search
         r_list = Path(self.roi_path).glob(f'*.nii*')
         roi_list = []
         self.roi_tree.fileList = roi_list
         for j in r_list:
-            roi_list.append([j,100])
+            roi_list.append([j, 100])
         self.roi_tree.file_path = self.roi_path
         self.roi_tree.display()
         self.roi_tree.fileList = roi_list
 
+    def search(self):
+        self.roi_search()
         ##############################
-
         self.result_tree.file_path = self.file_path
-        dataset = self.dataset.get()
-        identifier = f'*{dataset}*.feat'
-        if dataset=='':identifier = f'*.feat'
+        search_str = self.search_str.get()
+        search_str = search_str.split('-')
+        search_inc = search_str[0]
+        self.search_omit = ''
+        if len(search_str) > 1: self.search_omit = search_str[1]
+
+
+        identifier = f'*{search_inc}*.feat'
+        if search_inc == '':identifier = f'*.feat'
+
+        print(f'{search_inc} and {self.search_omit}')
 
         # Search for all files that match task
         search_list = Path(self.file_path).rglob(f'{identifier}')
-
+        filtered_list = self.apply_omit(search_list)
         filtered_list = self.apply_filters(search_list)
         self.result_tree.fileList = self.aggregated_list(filtered_list)
         self.result_tree.display()  # display the results
@@ -333,69 +347,63 @@ class MainArea(tk.Frame):
         self.threader(command_list)
         print('Timecourses Generated!')
 
-
     #  Allows user to create a custom design profile which can then be applied to all datasets
     def generate_profile(self):
         # use a sample profile to load the basics and
         # call FSL from here and run the FEAT tool.
-        id = 0
-        for row in self.result_tree.fileList:
-            if id == 0:
-                subject = row[0]
-                id += 1
-            else:
-                break
-
+        command_list = []
+        id = 1
         roi_name = self.roi_tree.selection_name
-        output_dir = subject/f'PPI_{roi_name}.feat'
-        subject_dir = subject/'filtered_func_data.nii.gz'
-        subject_timecourse = subject/f'timecourse_{roi_name}.txt'
-
-
-        sample_profile = self.root /'sample_design.fsf'
-        base_profile = self.root /'temp'/'temp_design.fsf'
-        subprocess.run(['cp', sample_profile, base_profile])
-        # read in the base profile
-        files = [base_profile, output_dir, subject_dir, subject_timecourse]
-        self.replace(files,1)
-        # Open Feat setup in FSL with this reference file
-        subprocess.run(['Feat', base_profile])
-        # reverse the subject specific paths
-        self.replace(files, 2)
-
-    def process(self):
-        command_list=[]
-        base_profile = self.root /'temp'/'temp_design.fsf'
-        roi_name = self.roi_tree.selection_name
-        n = 0
         for row in self.result_tree.fileList:
             subject = row[0]
-            # subject_profile = self.root/'temp'/ f'temp_{Path(subject).stem}.fsf'
-            subject_profile = self.root/'temp'/ f'temp_{n}.fsf'
             output_dir = subject / f'PPI_{roi_name}.feat'
-            subject_dir = subject / 'filtered_func_data.nii.gz'
+            subject_dir = subject / 'filtered_func_data'
             subject_timecourse = subject / f'timecourse_{roi_name}.txt'
+
+            if id == 1:
+                sample_profile = self.root / 'sample_design.fsf'
+                base_profile = self.root / 'temp' / 'temp_design.fsf'
+                subprocess.run(['cp', sample_profile, base_profile])
+
+                # read in the base profile
+                files = [base_profile, output_dir, subject_dir, subject_timecourse]
+                self.replace(files, 1)
+                command = ['feat', base_profile]
+                command_list.append([command])
+                # Open Feat setup in FSL with this reference file
+                subprocess.run(['Feat', base_profile])
+                # reverse the subject specific paths
+                self.replace(files, 2)
+
+            subject_profile = self.root / 'temp' / f'temp_{id}.fsf'
             subprocess.run(['cp', base_profile, subject_profile])
-            # subject_profile = base_profile
             # read in and modify the subject profile
             files = [subject_profile, output_dir, subject_dir, subject_timecourse]
             self.replace(files, 1)
             command = ['feat', subject_profile]
-
-            # subprocess.run(['feat', subject_profile])
-            # os.remove(f'{subject_profile}')
             command_list.append([command])
-            subprocess.run(command)
-            n+= 1
+            id += 1
 
-        # self.threader(command_list)
+        self.command_list_process = command_list
+        # print(command_list)
+
+    def process(self):
+        self.threader(self.command_list_process)
         # empty the temp folder
         self.clear_dir(self.root/'temp')
         print('Processing completed!')
 
+#####  Filtering results ########################################
+    def apply_omit(self,file_list):
+        filters = self.search_omit
+        if len(filters) != 0:
+            filters = filters
+            fl = [row for row in file_list if ~any(f in str(row) for f in filters)]
+        else:
+            fl = file_list
+        return fl
 
     def apply_filters(self,file_list):
-        # List of datasets as string for display purposes
         filters = self.filters.get()
         if len(filters) != 0:
             filters = filters.split(";")
@@ -410,6 +418,7 @@ class MainArea(tk.Frame):
             fl.append([row,1])
         return fl
 
+################################################################
     @staticmethod
     def replace(files, type):
         profile = files[0]
@@ -425,6 +434,7 @@ class MainArea(tk.Frame):
             data = data.replace('#$#', str(subject_dir))
             data = data.replace('#!#', str(subject_timecourse))
         else:
+            print(subject_dir)
             data = data.replace(str(output_dir), '#%#')
             data = data.replace(str(subject_dir), '#$#')
             data = data.replace(str(subject_timecourse), '#!#')
@@ -450,8 +460,6 @@ class MainArea(tk.Frame):
             print(f)
             subprocess.run(f)
 
-
-
 #-----------------------------------------------------------------------------------------------------------------------
 
 class StatusBar(tk.Frame):
@@ -472,16 +480,50 @@ class StatusBar(tk.Frame):
 #-----------------------------------------------------------------------------------------------------------------------
 
 class roi_funcs:
-    def __init__(self,master,er):
+    def __init__(self,master,roi_path, roi_search, roi_tree):
         self.master = master
-        self.er = er
+        self.er = Elements(self.master)
+        self.roi_path = roi_path
+        self.roi_search = roi_search
+        self.roi_tree = roi_tree
 
-    def peak_group(self,er):
-        self.er.button('Select image',self.select_cluster,'',0,1,'w',1)
+    def atlas_based(self):
+        # Threshold
+        self.thr_low = self.er.textField('Threshhold (low)',10,1,1)
+        self.thr_high = self.er.textField('Threshhold (high)', 10, 3, 1)
+        # Binarize button
+        self.er.button('Binarize',self.binarize,'',1,2,'w',1)
+
+        command = ['fsleyes','-std']
+        # subprocess.run(command)
+
+
+
+    def binarize(self):
+        roi_path = self.roi_tree.file_path
+        roi = self.roi_tree.selection_name
+        output = roi+ '_bin'
+        low = self.thr_low.get()
+        high = self.thr_high.get()
+        # threshold
+        command = ['fslmaths',Path(roi_path)/roi]
+        if low: command += ['-thr',low]
+        if high:command += ['-uthr', high]
+        if low or high:
+            command += [Path(roi_path)/output]
+            print(command)
+            subprocess.run(command)
+            input = output
+        else:
+            input = roi
+        # Binarize
+        command = ['fslmaths', Path(roi_path)/input, '-bin',Path(roi_path)/output]
+        subprocess.run(command)
+
+    def peak_group(self):
+        self.er.button('Select image', self.cluster_select, '', 0, 1, 'w', 1)
         self.er.button('Extract', self.cluster_extract, '', 0, 2, 'w', 1)
-
         print('Peak Group')
-
 
     def peak_individual(self):
         print('Peak Individual')
@@ -490,85 +532,69 @@ class roi_funcs:
         print('Group Differences')
 
     def geometry_based(self):
-        print('Geometry based')
-        self.FSLDIR = os.environ['FSLDIR']
-        # print(FSLDIR)
-        # FSLDIR1 = '/usr/local/fsl/'
-        # cartesian coordinates
+        # self.FSLDIR = os.environ['FSLDIR']
+        self.FSLDIR = '/usr/local/fsl/'
+
         self.x_c = self.er.textField(f'x:', '3', 4, 1)
         self.y_c = self.er.textField(f'y:', '3', 7, 1)
         self.z_c = self.er.textField(f'z:', '3', 10, 1)
-        # self.template = self.er.textField(f'Standard Template: ', '20', 0, 1)
         self.roi_name = self.er.textField(f'ROI Name: ', '20', 15, 1)
+        # Size of ROI
+        self.roi_size = self.er.textField(f'Size (mm): ', '5', 12, 1)
+        self.er.button('Generate ROI', self.geometry_process, '', 20, 1, 'w', 1)
+        # self.er.button('Generate ROI', appFuncs.thread, (self.master, self.geometry_process,True), 20, 1, 'w', 1)
 
         # Standard image
-        self.image_var = tk.StringVar(self.master)
         standard_search = Path(f'{self.FSLDIR}data/standard').glob('*.nii.gz')
         self.standard_list =[e.name for e in standard_search]
         self.standard_list.sort()
+        self.image_var = tk.StringVar(self.master)
 
-        self.std_image_options = tk.OptionMenu(self.master, self.image_var, *self.standard_list)
-
-        self.std_image_options.config(width=25)
-        self.std_image_options.grid(column=1, row=1)
+        self.std_image_options = self.er.popupMenu(self.image_var,self.standard_list,1,1,25,'w')
         self.image_var.set(self.standard_list[22])
 
         # Geometry options
         self.option_var =tk.StringVar(self.master)
         self.geometries = ['sphere','box','gauss']
-
-        self.geometry_options = tk.OptionMenu(self.master, self.option_var, *self.geometries)
-
-        self.geometry_options.config(width=10)
-        self.geometry_options.grid(row=2, column=1,sticky='w')
+        self.geometry_options = self.er.popupMenu(self.option_var,self.geometries,1,2,10,'w')
         self.option_var.set(self.geometries[0])
 
-        # Size of ROI
-        self.roi_size = self.er.textField(f'Size (mm): ', '5', 12, 1)
-        self.er.button('Generate ROI', self.geometry_process, '', 20, 1, 'w', 1)
-
-
     def geometry_process(self):
-        pre = '/home/quest/Drive/CCHMC/Dev_Projects/PPI/GUI/test_data/PPI/geometry/'
-        point_name = Path(pre) / f'{str(self.roi_name.get())}_point.nii.gz'
-        roi_name_unbin = Path(pre) / f'{self.roi_name.get()}_unbin.nii.gz'
-        roi_name = Path(pre) / f'{self.roi_name.get()}.nii.gz'
+        self.master.update_idletasks()
+        point_name = Path(self.roi_path) / f'{str(self.roi_name.get())}_point.nii.gz'
+        roi_name_unbin = Path(self.roi_path) / f'{self.roi_name.get()}_unbin.nii.gz'
+        roi_name = Path(self.roi_path) / f'{self.roi_name.get()}.nii.gz'
+        template = f'{self.FSLDIR}data/standard/{self.image_var.get()}'
 
-
-
-        template = f'{self.FSLDIR}data/standard/{self.image_var.get()}.nii.gz'
-
+        # Generate a point for the seed region
         command = ['fslmaths', template, '-mul', '0', '-add', '1', '-roi', str(self.x_c.get()), '1', str(self.y_c.get()), '1',
                    str(self.z_c.get()), '1', '0', '1', str(point_name), '-odt', 'float']
         subprocess.run(command)
+        # Generate an ROI around the point
         command = ['fslmaths', point_name, '-kernel', self.option_var.get(), str(self.roi_size.get()), '-fmean', roi_name_unbin,  '-odt', 'float']
-        # print(command)
         subprocess.run(command)
-
+        # Binarize the ROI mask
         command = ['fslmaths', roi_name_unbin, '-bin', roi_name]
-        # print(command)
         subprocess.run(command)
+        # Delete point and non-binarized files
         Path(point_name).unlink()
         Path(roi_name_unbin).unlink()
 
-    def blank(self):
-        pass
+        self.roi_search()
 
-    def select_cluster(self):
+    def cluster_select(self):
         self.var = appFuncs.select_file('Select image file')
-        # self.var = '/home/quest/Neuroimaging/aNMT_pre_withICAaroma/aNMT_pre_withICAaroma/ManuscriptAnalyses/RightlegCKCfrontalROMonlyMARCHUSE_withcov.gfeat/cope1.feat/cluster_mask_zstat1.nii.gz'
-        self.num_clusters()
+        self.cluster_num()
         self.cluster = self.er.textField(f'Cluster Number (0-{self.cluster_indexes[0]})', '10', 1, 1)
 
     def cluster_extract(self):
         cluster = str(self.cluster.get())
-        destination = appFuncs.selectPath()
-        mask_name = Path(destination)/f'extracted_cluster_{cluster}.nii.gz'
+        mask_name = Path(self.roi_path)/f'extracted_cluster_{cluster}.nii.gz'
         command = ['fslmaths','-dt','int', self.var, '-thr', cluster, '-uthr', cluster, '-bin', mask_name]
         subprocess.run(command)
         print('Extraction complete!')
 
-    def num_clusters(self):
+    def cluster_num(self):
         self.cluster_indexes =[]
         file_dir = Path(self.var).parent
         file_name = Path(Path(self.var).stem).stem
@@ -591,8 +617,31 @@ class roi_funcs:
                         self.cluster_indexes.append(r[0])
                 f.close()
 
+    def blank(self):
+        pass
+
 
 class appFuncs:
+    @staticmethod
+    def thread(*args):
+        n=0
+        for i in args:
+            if n==0:
+               self = i
+            if n==1:
+                command = i
+            if n==2:
+                is_daemon = i
+            n+=1
+        # self.update_idletasks()
+        x = threading.Thread(target=subprocess.run, args=(command))
+        x.daemon = is_daemon
+        x.start()
+
+    def process(self,command):
+        subprocess.run(command)
+
+
     # Generates file dialog box
     @staticmethod
     def selectPath():
